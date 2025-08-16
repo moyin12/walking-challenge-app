@@ -7,11 +7,11 @@ export interface User {
 
 export interface Challenge {
     id: string;
-    title: string;
-    participants: User[];
-    totalSteps: number;
-    startDate: Date;
-    endDate: Date;
+    name: string;
+    startDate: string; // Or Date
+    endDate: string; // Or Date
+    participantIds: string[];
+    // Add any other properties of a challenge here
 }
 
 export interface LeaderboardEntry {

@@ -1,63 +1,174 @@
-import firebase from 'firebase/app';
-import 'firebase/auth';
-import 'firebase/firestore';
-import 'firebase/database';
+import { initializeApp } from 'firebase/app';
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  OAuthProvider,
+  GoogleAuthProvider,
+  signInWithCredential,
+  UserCredential,
+} from 'firebase/auth';
+import {
+  getFirestore,
+  collection,
+  getDocs,
+  addDoc,
+  onSnapshot,
+  DocumentData,
+  Unsubscribe,
+} from 'firebase/firestore';
+import { getDatabase } from 'firebase/database';
+import {
+  API_KEY,
+  AUTH_DOMAIN,
+  PROJECT_ID,
+  STORAGE_BUCKET,
+  MESSAGING_SENDER_ID,
+  APP_ID,
+  DATABASE_URL, // Keep this if you also use Realtime DB, otherwise remove
+  GOOGLE_WEB_CLIENT_ID,
+} from '@env';
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
+import {
+  appleAuth,
+  AppleButton,
+} from '@invertase/react-native-apple-authentication';
+import { Challenge } from '../types';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_AUTH_DOMAIN",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_STORAGE_BUCKET",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID",
-  databaseURL: "YOUR_DATABASE_URL"
+  apiKey: API_KEY, // Use the imported variable directly
+  authDomain: AUTH_DOMAIN,
+  projectId: PROJECT_ID,
+  storageBucket: STORAGE_BUCKET,
+  messagingSenderId: MESSAGING_SENDER_ID,
+  appId: APP_ID,
+  databaseURL: DATABASE_URL, // This is for Realtime Database, not Firestore
 };
 
 // Initialize Firebase
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
+const app = initializeApp(firebaseConfig);
 
-// Firebase authentication
-export const auth = firebase.auth();
+// Exports for Firebase services
+export const auth = getAuth(app);
+export const firestore = getFirestore(app);
+export const database = getDatabase(app); // For Realtime Database
 
-// Firestore database
-export const firestore = firebase.firestore();
+// --- Social Auth Configuration ---
+GoogleSignin.configure({
+  webClientId: GOOGLE_WEB_CLIENT_ID, // Get this from your Google Cloud console
+});
 
-// Realtime database
-export const database = firebase.database();
-
-// Function to create a new user
-export const createUser = async (email, password) => {
-  return await auth.createUserWithEmailAndPassword(email, password);
+// --- Auth Functions ---
+export const createUser = (
+  email: string,
+  password: string
+): Promise<UserCredential> => {
+  return createUserWithEmailAndPassword(auth, email, password);
 };
 
-// Function to sign in a user
-export const signInUser = async (email, password) => {
-  return await auth.signInWithEmailAndPassword(email, password);
+export const signInUser = (
+  email: string,
+  password: string
+): Promise<UserCredential> => {
+  return signInWithEmailAndPassword(auth, email, password);
 };
 
-// Function to sign out a user
-export const signOutUser = async () => {
-  return await auth.signOut();
+export const signOutUser = (): Promise<void> => {
+  return signOut(auth);
 };
 
-// Function to get challenges from Firestore
-export const getChallenges = async () => {
-  const challengesSnapshot = await firestore.collection('challenges').get();
-  return challengesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+// --- Social Auth Functions ---
+
+export const signInWithGoogle = async (): Promise<UserCredential> => {
+  try {
+    // Check if your device supports Google Play
+    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    // Get the users ID token
+    const { idToken } = await GoogleSignin.signIn();
+
+    if (!idToken) {
+      throw new Error('Google Sign-In failed: No ID token received.');
+    }
+
+    // Create a Google credential with the token
+    const googleCredential = GoogleAuthProvider.credential(idToken);
+
+    // Sign-in the user with the credential
+    return signInWithCredential(auth, googleCredential);
+  } catch (error: any) {
+    if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+      // user cancelled the login flow
+      console.log('Google Sign-in was cancelled');
+    } else if (error.code === statusCodes.IN_PROGRESS) {
+      // operation (e.g. sign in) is in progress already
+      console.log('Google Sign-in is already in progress');
+    } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+      // play services not available or outdated
+      console.log('Google Play services are not available');
+    } else {
+      // some other error happened
+      console.error(error);
+    }
+    throw error;
+  }
 };
 
-// Function to add a new challenge
-export const addChallenge = async (challengeData) => {
-  return await firestore.collection('challenges').add(challengeData);
+export const signInWithApple = async (): Promise<UserCredential> => {
+  // Start the sign-in request
+  const appleAuthRequestResponse = await appleAuth.performRequest({
+    requestedOperation: appleAuth.Operation.LOGIN,
+    requestedScopes: [appleAuth.Scope.EMAIL, appleAuth.Scope.FULL_NAME],
+  });
+
+  // Get the identity token
+  const { identityToken, nonce } = appleAuthRequestResponse;
+
+  if (!identityToken) {
+    throw new Error('Apple Sign-In failed - no identity token returned');
+  }
+
+  // Create a Firebase credential with the token
+  const appleCredential = new OAuthProvider('apple.com').credential({
+    idToken: identityToken,
+    rawNonce: nonce,
+  });
+
+  // Sign-in the user with the credential
+  return signInWithCredential(auth, appleCredential);
 };
 
-// Function to subscribe to real-time updates for challenges
-export const subscribeToChallenges = (callback) => {
-  return firestore.collection('challenges').onSnapshot(snapshot => {
-    const challenges = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+// --- Firestore Functions ---
+const challengesCollection = collection(firestore, 'challenges');
+
+export const getChallenges = async (): Promise<Challenge[]> => {
+  const challengesSnapshot = await getDocs(challengesCollection);
+  return challengesSnapshot.docs.map(
+    (doc) => ({ id: doc.id, ...doc.data() } as Challenge)
+  );
+};
+
+export const addChallenge = (
+  challengeData: Omit<Challenge, 'id'>
+): Promise<DocumentData> => {
+  return addDoc(challengesCollection, challengeData);
+};
+
+export const subscribeToChallenges = (
+  callback: (challenges: Challenge[]) => void
+): Unsubscribe => {
+  return onSnapshot(challengesCollection, (snapshot) => {
+    const challenges = snapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        } as Challenge)
+    );
     callback(challenges);
   });
 };
