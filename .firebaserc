@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "default": {
+      "database": "https://<YOUR-FIREBASE-PROJECT-ID>.firebaseio.com",
+      "projectId": "<YOUR-FIREBASE-PROJECT-ID>",
+      "storage": "gs://<YOUR-FIREBASE-PROJECT-ID>.appspot.com"
+    }
+  }
+}
